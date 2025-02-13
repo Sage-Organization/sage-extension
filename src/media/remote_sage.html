@@ -1,0 +1,291 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Sage</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.4/css/all.min.css">
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+    <!-- Include highlight.js dark theme CSS -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.6.0/styles/github-dark.min.css">
+    <!-- Include highlight.js library -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.6.0/highlight.min.js"></script>
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        'dark-grey': '#1e1e1e',
+                        'light-grey': '#2d2d2d',
+                        'lighter-grey': '#3d3d3d',
+                        'border-grey': '#4d4d4d',
+                    }
+                }
+            }
+        }
+    </script>
+    <style>
+        /* Prevent the body from scrolling */
+        html, body {
+            overflow: hidden;
+        }
+        /* Simple context menu styling */
+        #contextMenu {
+            position: absolute;
+            background-color: #ffffff;
+            color: #000000;
+            border: none;
+            border-radius: 4px;
+            box-shadow: 0 2px 6px rgba(0,0,0,0.15);
+            display: none;
+            z-index: 1000;
+            min-width: 150px;
+        }
+        #contextMenu div {
+            padding: 8px 12px;
+            cursor: pointer;
+        }
+        #contextMenu div:hover {
+            background-color: #f2f2f2;
+        }
+        pre {
+            margin: 0;
+            white-space: pre-wrap;
+            word-wrap: break-word;
+        }
+        code {
+            background: transparent !important;
+        }
+        .code-block {
+            background-color: var(--vscode-editor-background);
+            font-family: var(--vscode-editor-font-family);
+            font-size: var(--vscode-editor-font-size);
+        }
+        /* Add markdown styling */
+        .markdown-content {
+            width: 100%;
+            color: inherit;
+        }
+        .markdown-content ul, .markdown-content ol {
+            padding-left: 1.5em;
+            margin: 0.5em 0;
+        }
+        .markdown-content li {
+            margin: 0.25em 0;
+        }
+        .markdown-content p {
+            margin: 0.5em 0;
+        }
+        .markdown-content strong {
+            font-weight: bold;
+        }
+        .markdown-content em {
+            font-style: italic;
+        }
+        .markdown-content h1, .markdown-content h2, .markdown-content h3 {
+            margin: 0.5em 0;
+            font-weight: bold;
+        }
+        /* Add these styles */
+        .chat-container {
+            mask-image: linear-gradient(to top, transparent, black 30px);
+            -webkit-mask-image: linear-gradient(to top, transparent, black 30px);
+        }
+        /* Add border to code blocks in chat */
+        .markdown-content pre {
+            border: 1px solid #404040;
+            border-radius: 6px;
+            padding: 1em;
+            margin: 0.5em 0;
+            width: 100%;
+            box-sizing: border-box;
+            overflow-x: auto;
+        }
+        /* Add padding to chat history container */
+        #chatHistory {
+            padding-right: 4px;  /* Small padding between content and scrollbar */
+        }
+        /* Ensure message containers take full width */
+        .flex.justify-start.mb-4 > div {
+            width: calc(100% - 4px) !important;  /* Subtract the padding to prevent horizontal scroll */
+            max-width: calc(100% - 4px) !important;
+        }
+        /* Code preview styles */
+        #codePreview {
+            transition: max-height 0.3s ease-in-out;
+        }
+        
+        #codePreviewContent {
+            transition: max-height 0.3s ease-in-out;
+        }
+        
+        #codePreview .markdown-content pre {
+            margin: 0;  /* Remove margin since we're in a dedicated preview container */
+        }
+        
+        /* Style the control buttons container */
+        #codePreview .absolute {
+            background-color: rgba(45, 45, 45, 0.8);  /* Semi-transparent background */
+            border-radius: 6px;
+            padding: 2px;
+        }
+        /* Add line numbers styling */
+        .markdown-content pre {
+            counter-reset: line;
+        }
+        
+        .markdown-content pre code {
+            display: block;
+            padding-left: 3em !important;  /* Space for line numbers */
+            position: relative;
+        }
+        
+        .markdown-content pre code::before {
+            counter-increment: line;
+            content: counter(line);
+            position: absolute;
+            left: 0;
+            width: 2.5em;
+            text-align: right;
+            color: #666;
+            padding-right: 0.5em;
+            border-right: 1px solid #404040;
+            user-select: none;
+        }
+        
+        /* Ensure the filename doesn't wrap */
+        #codePreviewFilename {
+            max-width: 200px;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+            display: inline-block;
+        }
+    </style>
+</head>
+<body class="bg-dark-grey text-gray-200 h-screen overflow-hidden">
+    <div class="container mx-auto max-w-5xl h-full flex flex-col px-6 pr-8 py-6 overflow-hidden">
+        <!-- Header (fixed height) -->
+        <div class="flex items-center justify-between mb-4 flex-shrink-0">
+            <!-- Left side: Connection Status and Model -->
+            <div class="text-sm flex items-center space-x-3">
+                <span class="%STATUS_CLASS%">
+                    <i class="fas fa-circle mr-1"></i>%STATUS%
+                </span>
+                <span class="text-gray-500 opacity-75" id="modelInfo">
+                    Loading model...
+                </span>
+            </div>
+            
+            <!-- Right side: Buttons with dropdown -->
+            <div class="flex items-center space-x-2">
+                <!-- Chat History Dropdown -->
+                <div class="relative">
+                    <button 
+                        id="historyDropdownButton"
+                        class="px-4 py-2 bg-lighter-grey hover:bg-gray-700 text-white rounded-lg transition-colors text-sm flex items-center"
+                        onclick="toggleHistoryDropdown()">
+                        <i class="fas fa-history mr-2"></i>History
+                    </button>
+                    <!-- Dropdown Content -->
+                    <div id="historyDropdown" 
+                         class="hidden absolute right-0 mt-2 w-64 bg-light-grey rounded-lg shadow-lg z-50 max-h-96 overflow-y-auto">
+                        <div id="sessionList" class="py-2">
+                            <!-- Sessions will be populated here -->
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Configure Button -->
+                <button 
+                    class="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition-colors text-sm"
+                    onclick="reconfigure()">
+                    <i class="fas fa-cog mr-2"></i>Configure
+                </button>
+
+                <!-- New Chat Button -->
+                <button 
+                    class="px-4 py-2 bg-green-600 hover:bg-green-700 text-white rounded-lg transition-colors text-sm"
+                    onclick="newChatSession()">
+                    <i class="fas fa-plus mr-2"></i>New Chat
+                </button>
+            </div>
+        </div>
+
+        <!-- Main Chat Area (fills remaining height) -->
+        <div class="flex-1 overflow-hidden relative">
+            <!-- Chat Panel -->
+            <div class="flex flex-col h-full">
+                <!-- Chat History (scrollable area) -->
+                <div id="chatHistory" class="flex-1 overflow-y-auto pb-4 chat-container">
+                    <!-- Chat messages will appear here -->
+                </div>
+                <!-- Add this right before the message input div -->
+                <div id="codePreview" class="hidden mb-4">
+                    <div class="relative bg-light-grey rounded-lg p-4 max-h-[200px] overflow-hidden">
+                        <!-- Header with filename and controls -->
+                        <div class="absolute top-2 left-2 right-2 flex justify-between items-center">
+                            <!-- Filename -->
+                            <div class="p-1.5 bg-gray-700 rounded-md text-gray-300 text-xs">
+                                <span id="codePreviewFilename">Untitled</span>
+                            </div>
+                            
+                            <!-- Control buttons -->
+                            <div class="flex space-x-2">
+                                <button onclick="toggleCodePreview()" 
+                                        class="p-1.5 bg-gray-700 hover:bg-gray-600 rounded-md text-gray-300 text-xs">
+                                    <i class="fas fa-expand"></i>
+                                </button>
+                                <button onclick="clearCodePreview()" 
+                                        class="p-1.5 bg-gray-700 hover:bg-gray-600 rounded-md text-gray-300 text-xs">
+                                    <i class="fas fa-times"></i>
+                                </button>
+                            </div>
+                        </div>
+                        
+                        <!-- Code content container with added top padding for the header -->
+                        <div id="codePreviewContent" class="markdown-content overflow-y-auto max-h-[200px] pr-4 mt-8">
+                            <!-- Code will be inserted here -->
+                        </div>
+                    </div>
+                </div>
+                <!-- Message Input (fixed at bottom) -->
+                <div class="mt-4">
+                    <div class="relative bg-gray-800 rounded-xl">
+                        <textarea 
+                            id="messageInput"
+                            class="w-full p-4 pr-16 bg-transparent text-white focus:outline-none resize-none"
+                            placeholder="Type your message here..."
+                            rows="1"
+                            onkeydown="handleKeyPress(event)"
+                            oninput="autoGrow(this)"
+                        ></textarea>
+                        <button 
+                            class="absolute bottom-2 right-2 px-2 py-1 bg-gray-700 hover:bg-gray-600 text-gray-300 text-xs rounded transition-colors flex items-center"
+                            onclick="sendMessage()">
+                            submit <svg class="ml-1 w-3 h-3" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                                <g clip-path="url(#clip0_429_11016)">
+                                    <path d="M5.25201 9.97523L16.9111 4.42326C18.6115 3.61355 20.3864 5.38846 19.5767 7.08885L14.0248 18.748C13.2661 20.3413 10.966 20.2427 10.3464 18.5904L9.3192 15.8512C9.11639 15.3104 8.68964 14.8836 8.14879 14.6808L5.40963 13.6536C3.75729 13.034 3.65873 10.7339 5.25201 9.97523Z" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
+                                </g>
+                                <defs>
+                                    <clipPath id="clip0_429_11016">
+                                        <rect width="24" height="24" fill="white"/>
+                                    </clipPath>
+                                </defs>
+                            </svg>
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Context Menu for Session items -->
+    <div id="contextMenu">
+        <div onclick="deleteSessionOption()">Delete Chat Session</div>
+    </div>
+
+    <script src="./media/js/sage.js" type="module"></script>
+</body>
+</html> 

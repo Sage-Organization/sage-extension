@@ -28,168 +28,195 @@ export class RemoteViewProvider extends BaseViewProvider {
             this._view = webviewView;
             webviewView.webview.options = this.getWebviewOptions();
 
-            // Add visibility change listener
-            this._disposables.push(
-                webviewView.onDidChangeVisibility(async () => {
-                    if (webviewView.visible) {
-                        const config = vscode.workspace.getConfiguration('sage');
-                        const backendUrl = config.get('currentRemoteBackendUrl') as string;
-                        this.updateConnectionStatus(false, 'Connecting...');
-                        await this.initializeState(backendUrl, webviewView);
-                    }
-                })
-            );
+            // Set up listeners and load HTML
+            this.setupVisibilityListener(webviewView);
+            this.setupMessageListener(webviewView);
+            this.loadChatInterface(webviewView);
 
-            const config = vscode.workspace.getConfiguration('sage');
-            const backendUrl = config.get('currentRemoteBackendUrl') as string;
-
-            // Load the chat interface first
-            const filePath = path.join(this.context.extensionPath, 'src', 'media', 'sage.html');
-            let htmlContent = fs.readFileSync(filePath, 'utf8');
-            const mediaPath = vscode.Uri.file(
-                path.join(this.context.extensionPath, 'src', 'media')
-            );
-            const mediaUri = webviewView.webview.asWebviewUri(mediaPath);
-            htmlContent = htmlContent.replace(/src="\.\/media\//g, `src="${mediaUri}/`);
-            
-            webviewView.webview.html = htmlContent;
-
-            // ALWAYS reinitialize state when view is focused
-            this.updateConnectionStatus(false, 'Connecting...');
+            const backendUrl = this.getBackendUrl();
+            this.handleConnectionStatus(false, 'Connecting...');
             await this.initializeState(backendUrl, webviewView);
-
-            // Set up message handling
-            webviewView.webview.onDidReceiveMessage(async message => {
-                try {
-                    await this.handleMessage(message, webviewView);
-                } catch (error: any) {
-                    await this.handleError(error, 'Failed to process message');
-                }
-            });
-
         } catch (error: any) {
             await this.handleError(error, 'Failed to connect to remote backend');
-            return;
         }
     }
 
-    private async initializeState(backendUrl: string, webviewView: vscode.WebviewView) {
-        try {
-            // Test server connection
-            await axios.get(`${backendUrl}/health`);
-            this.updateConnectionStatus(true, 'Connected');
-
-            // Validate and setup user
-            const serverProfiles = await loadServerProfiles(this.context);
-            let profile = serverProfiles[backendUrl];
-
-            if (profile?.userId) {
-                try {
-                    await axios.get(`${backendUrl}/api/user/validate/${profile.userId}`);
-                } catch (error) {
-                    delete serverProfiles[backendUrl];
-                    await saveServerProfiles(this.context, serverProfiles);
-                    profile = { userId: '' };
+    // --- UI Setup Methods ---
+    private setupVisibilityListener(webviewView: vscode.WebviewView) {
+        this._disposables.push(
+            webviewView.onDidChangeVisibility(async () => {
+                if (webviewView.visible) {
+                    const backendUrl = this.getBackendUrl();
+                    this.handleConnectionStatus(false, 'Connecting...');
+                    await this.initializeState(backendUrl, webviewView);
                 }
-            }
+            })
+        );
+    }
 
-            if (!profile?.userId) {
-                const userResponse = await axios.post(`${backendUrl}/api/user/users`);
-                const userId = userResponse.data.id;
-                serverProfiles[backendUrl] = { userId };
+    private setupMessageListener(webviewView: vscode.WebviewView) {
+        webviewView.webview.onDidReceiveMessage(async message => {
+            try {
+                await this.handleMessage(message, webviewView);
+            } catch (error: any) {
+                await this.handleError(error, 'Failed to process message');
+            }
+        });
+    }
+
+    private loadChatInterface(webviewView: vscode.WebviewView) {
+        const filePath = path.join(this.context.extensionPath, 'src', 'media', 'remote_sage.html');
+        let htmlContent = fs.readFileSync(filePath, 'utf8');
+        const mediaPath = vscode.Uri.file(path.join(this.context.extensionPath, 'src', 'media'));
+        const mediaUri = webviewView.webview.asWebviewUri(mediaPath);
+        htmlContent = htmlContent.replace(/src="\.\/media\//g, `src="${mediaUri}/`);
+        webviewView.webview.html = htmlContent;
+    }
+
+    private getBackendUrl(): string {
+        const config = vscode.workspace.getConfiguration('sage');
+        return config.get('currentRemoteBackendUrl') as string;
+    }
+    
+    private async initializeState(backendUrl: string, webviewView: vscode.WebviewView) {
+        // Break down into steps for clarity.
+        await this.testConnection(backendUrl, webviewView);
+        const profile = await this.ensureUserProfile(backendUrl);
+        await this.updateModelInfoInView(backendUrl, webviewView);
+        await this.restoreLastChatSession(backendUrl, webviewView, profile);
+        await this.saveState(backendUrl, profile.userId);
+    }
+
+    private async testConnection(backendUrl: string, webviewView: vscode.WebviewView) {
+        await axios.get(`${backendUrl}/health`);
+        this.handleConnectionStatus(true, 'Connected');
+    }
+
+    private async ensureUserProfile(backendUrl: string): Promise<{ userId: string }> {
+        const serverProfiles = await loadServerProfiles(this.context);
+        let profile = serverProfiles[backendUrl] || { userId: '' };
+
+        if (profile.userId) {
+            try {
+                await axios.get(`${backendUrl}/api/user/validate/${profile.userId}`);
+            } catch (error) {
+                delete serverProfiles[backendUrl];
                 await saveServerProfiles(this.context, serverProfiles);
-                profile = serverProfiles[backendUrl];
+                profile = { userId: '' };
             }
+        }
 
-            // Fetch and update model info
+        if (!profile.userId) {
+            const userResponse = await axios.post(`${backendUrl}/api/user/users`);
+            profile.userId = userResponse.data.id;
+            serverProfiles[backendUrl] = profile;
+            await saveServerProfiles(this.context, serverProfiles);
+        }
+        return profile;
+    }
+
+    private async updateModelInfoInView(backendUrl: string, webviewView: vscode.WebviewView) {
+        try {
             const modelResponse = await axios.get(`${backendUrl}/api/llm/current`);
-            const modelName = modelResponse.data;
             webviewView.webview.postMessage({ 
                 command: 'updateModelInfo', 
-                model: modelName 
+                model: modelResponse.data 
             });
-
-            // Fetch chat sessions
-            const sessions = await this.fetchChatSessions(backendUrl);
-            if (sessions) {
-                webviewView.webview.postMessage({
-                    command: 'updateSessions',
-                    sessions: sessions
-                });
-
-                // Restore last active session
-                console.log('Restoring last active session');
-                const lastSessionId = await this.context.globalState.get(RemoteViewProvider.LAST_SESSION_KEY);
-                if (lastSessionId) {
-                    try {
-                        console.log('Loading last active session');
-                        const sessionResponse = await axios.get(
-                            `${backendUrl}/api/chat/sessions/${lastSessionId}`,
-                            { headers: { 'x-user-id': profile.userId } }
-                        );
-                        this._currentSessionId = lastSessionId as string;
-                        webviewView.webview.postMessage({
-                            command: 'updateChatHistory',
-                            messages: sessionResponse.data.messages
-                        });
-                    } catch (error) {
-                        // If last session can't be loaded, clear it
-                        await this.context.globalState.update(RemoteViewProvider.LAST_SESSION_KEY, undefined);
-                    }
-                }
-            }
-
-            // Save the current state
-            await this.context.globalState.update(RemoteViewProvider.STATE_KEY, {
-                backendUrl,
-                userId: profile.userId,
-                sessionId: this._currentSessionId
-            });
-
-        } catch (error: any) {
-            throw new Error(this.formatAxiosError(error));
+        } catch (error) {
+            console.error('Error fetching model info', error);
         }
     }
 
-    private async handleMessage(message: any, webviewView: vscode.WebviewView) {
-        const config = vscode.workspace.getConfiguration('sage');
-        const backendUrl = config.get('currentRemoteBackendUrl') as string;
+    private async restoreLastChatSession(
+        backendUrl: string,
+        webviewView: vscode.WebviewView,
+        profile: { userId: string }
+    ) {
+        const sessions = await this.fetchChatSessions(backendUrl);
+        if (sessions) {
+            webviewView.webview.postMessage({
+                command: 'updateSessions',
+                sessions: sessions
+            });
 
-        try {
-            switch (message.command) {
-                case 'tokenize':
-                    webviewView.webview.postMessage({
-                        command: 'tokenized',
-                        originalCode: message.code,
-                        tokenizedCode: this.escapeHtml(message.code)
-                    });
-                    break;
-                case 'sendMessage':
-                    await this.handleSendMessage(message, webviewView);
-                    break;
-                case 'selectSession':
-                    await this.handleSelectSession(message, webviewView);
-                    break;
-                case 'newChatSession':
-                    this._currentSessionId = undefined;
-                    await this.context.globalState.update(RemoteViewProvider.LAST_SESSION_KEY, undefined);
+            const lastSessionId = this.context.globalState.get(RemoteViewProvider.LAST_SESSION_KEY);
+            if (lastSessionId) {
+                try {
+                    const sessionResponse = await axios.get(
+                        `${backendUrl}/api/chat/sessions/${lastSessionId}`,
+                        { headers: { 'x-user-id': profile.userId } }
+                    );
+                    this._currentSessionId = lastSessionId as string;
                     webviewView.webview.postMessage({
                         command: 'updateChatHistory',
-                        messages: []
+                        messages: sessionResponse.data.messages
                     });
-                    break;
-                case 'deleteSession':
-                    await this.handleDeleteSession(message, webviewView);
-                    break;
-                case 'reconfigure':
-                    await this.handleReconfigure(webviewView);
-                    break;
-                case 'getModelInfo':
-                    await this.handleGetModelInfo(webviewView);
-                    break;
+                } catch (error) {
+                    // If restoration fails, clear the last active session
+                    await this.context.globalState.update(RemoteViewProvider.LAST_SESSION_KEY, undefined);
+                }
             }
-        } catch (error: any) {
-            throw new Error(this.formatAxiosError(error));
+        }
+    }
+
+    private async saveState(backendUrl: string, userId: string) {
+        await this.context.globalState.update(RemoteViewProvider.STATE_KEY, {
+            backendUrl,
+            userId,
+            sessionId: this._currentSessionId
+        });
+    }
+
+    // --- Message Handling Logic ---
+    private async handleMessage(message: any, webviewView: vscode.WebviewView) {
+        switch (message.command) {
+            case 'tokenize':
+                webviewView.webview.postMessage({
+                    command: 'tokenized',
+                    originalCode: message.code,
+                    tokenizedCode: this.escapeHtml(message.code)
+                });
+                break;
+            case 'sendMessage':
+                await this.handleSendMessage(message, webviewView);
+                break;
+            case 'selectSession':
+                await this.handleSelectSession(message, webviewView);
+                break;
+            case 'newChatSession':
+                this._currentSessionId = undefined;
+                await this.context.globalState.update(RemoteViewProvider.LAST_SESSION_KEY, undefined);
+                webviewView.webview.postMessage({
+                    command: 'updateChatHistory',
+                    messages: []
+                });
+                break;
+            case 'deleteSession':
+                await this.handleDeleteSession(message, webviewView);
+                break;
+            case 'reconfigure':
+                await this.handleReconfigure(webviewView);
+                break;
+            case 'getModelInfo':
+                await this.handleGetModelInfo(webviewView);
+                break;
+            case 'getActiveFile': {
+                const editor = vscode.window.activeTextEditor;
+                if (editor && this._view) {
+                    this._view.webview.postMessage({
+                        command: 'activeFile',
+                        file: editor.document.fileName,
+                        selection: {
+                            start: editor.selection.start.line + 1,
+                            end: editor.selection.end.line + 1
+                        }
+                    });
+                }
+                break;
+            }
+            default:
+                console.warn('Unknown command received:', message.command);
+                break;
         }
     }
 
@@ -203,76 +230,67 @@ export class RemoteViewProvider extends BaseViewProvider {
     }
 
     private async handleSendMessage(message: any, webviewView: vscode.WebviewView) {
-        const config = vscode.workspace.getConfiguration('sage');
-        const backendUrl = config.get('currentRemoteBackendUrl') as string;
-
-        try {
-            if (message.text) {
-                const serverProfiles = await loadServerProfiles(this.context);
-                const profile = serverProfiles[backendUrl];
-                
-                if (!profile || !profile.userId) {
-                    MessageManager.showError("User ID not configured. Please reconfigure your connection.");
-                    return;
-                }
-
-                if (!this._currentSessionId) {
-                    const sessionResponse = await axios.post(
-                        `${backendUrl}/api/chat/sessions`,
-                        null,
-                        { headers: { 'x-user-id': profile.userId } }
-                    );
-                    this._currentSessionId = sessionResponse.data.session_id;
-                }
-
-                webviewView.webview.postMessage({
-                    command: 'addMessage',
-                    message: { role: 'user', content: message.text }
-                });
-
-                const response = await axios.post(
-                    `${backendUrl}/api/chat/sessions/${this._currentSessionId}/messages`,
-                    { content: message.text },
-                    { headers: { 'x-user-id': profile.userId } }
-                );
-
-                if (response.data.message) {
-                    webviewView.webview.postMessage({
-                        command: 'addMessage',
-                        message: response.data.message
-                    });
-                }
-
-                // Refresh sessions list
-                const sessions = await this.fetchChatSessions(backendUrl);
-                if (sessions) {
-                    webviewView.webview.postMessage({
-                        command: 'updateSessions',
-                        sessions: sessions
-                    });
-                }
-            }
-        } catch (error: any) {
-            await this.handleError(error, 'Failed to send message');
+        const backendUrl = this.getBackendUrl();
+        if (!message.text) return;
+    
+        const serverProfiles = await loadServerProfiles(this.context);
+        const profile = serverProfiles[backendUrl];
+        if (!profile || !profile.userId) {
+            MessageManager.showError("User ID not configured. Please reconfigure your connection.");
+            return;
+        }
+    
+        if (!this._currentSessionId) {
+            const sessionResponse = await axios.post(
+                `${backendUrl}/api/chat/sessions`,
+                null,
+                { headers: { 'x-user-id': profile.userId } }
+            );
+            this._currentSessionId = sessionResponse.data.session_id;
+        }
+    
+        webviewView.webview.postMessage({
+            command: 'addMessage',
+            message: { role: 'user', content: message.text }
+        });
+    
+        const response = await axios.post(
+            `${backendUrl}/api/chat/sessions/${this._currentSessionId}/messages`,
+            { content: message.text },
+            { headers: { 'x-user-id': profile.userId } }
+        );
+    
+        if (response.data.message) {
+            webviewView.webview.postMessage({
+                command: 'addMessage',
+                message: response.data.message
+            });
+        }
+    
+        // Refresh sessions list
+        const sessions = await this.fetchChatSessions(backendUrl);
+        if (sessions) {
+            webviewView.webview.postMessage({
+                command: 'updateSessions',
+                sessions: sessions
+            });
         }
     }
 
     private async handleSelectSession(message: any, webviewView: vscode.WebviewView) {
-        const config = vscode.workspace.getConfiguration('sage');
-        const backendUrl = config.get('currentRemoteBackendUrl') as string;
-
+        const backendUrl = this.getBackendUrl();
         if (message.sessionId) {
+            const serverProfiles = await loadServerProfiles(this.context);
+            const profile = serverProfiles[backendUrl];
+    
             try {
-                const serverProfiles = await loadServerProfiles(this.context);
-                const profile = serverProfiles[backendUrl];
-
                 const sessionResponse = await axios.get(
                     `${backendUrl}/api/chat/sessions/${message.sessionId}`,
                     { headers: { 'x-user-id': profile.userId } }
                 );
                 this._currentSessionId = message.sessionId;
                 await this.context.globalState.update(RemoteViewProvider.LAST_SESSION_KEY, message.sessionId);
-                
+    
                 webviewView.webview.postMessage({
                     command: 'updateChatHistory',
                     messages: sessionResponse.data.messages
@@ -285,20 +303,18 @@ export class RemoteViewProvider extends BaseViewProvider {
     }
 
     private async handleDeleteSession(message: any, webviewView: vscode.WebviewView) {
-        const config = vscode.workspace.getConfiguration('sage');
-        const backendUrl = config.get('currentRemoteBackendUrl') as string;
-
+        const backendUrl = this.getBackendUrl();
         if (message.sessionId) {
+            const serverProfiles = await loadServerProfiles(this.context);
+            const profile = serverProfiles[backendUrl];
+    
             try {
-                const serverProfiles = await loadServerProfiles(this.context);
-                const profile = serverProfiles[backendUrl];
-
                 await axios.delete(
                     `${backendUrl}/api/chat/sessions/${message.sessionId}`,
                     { headers: { 'x-user-id': profile.userId } }
                 );
                 MessageManager.showInfo("Chat session deleted successfully.");
-
+    
                 if (this._currentSessionId === message.sessionId) {
                     this._currentSessionId = undefined;
                     await this.context.globalState.update(RemoteViewProvider.LAST_SESSION_KEY, undefined);
@@ -307,7 +323,7 @@ export class RemoteViewProvider extends BaseViewProvider {
                         messages: []
                     });
                 }
-
+    
                 const sessions = await this.fetchChatSessions(backendUrl);
                 if (sessions) {
                     webviewView.webview.postMessage({
@@ -325,11 +341,10 @@ export class RemoteViewProvider extends BaseViewProvider {
     private async handleReconfigure(webviewView: vscode.WebviewView) {
         try {
             MessageManager.showInfo('Reconfiguring Sage...');
-            // Reset configuration
             await vscode.workspace.getConfiguration().update('sage.isConfigured', false, true);
             await vscode.workspace.getConfiguration().update('sage.currentRemoteBackendUrl', '', true);
             
-            // Force switch to connection view
+            // Reset state and switch view
             this._currentSessionId = undefined;
             await this.context.globalState.update(RemoteViewProvider.LAST_SESSION_KEY, undefined);
             await this.context.globalState.update(RemoteViewProvider.STATE_KEY, undefined);
@@ -339,11 +354,53 @@ export class RemoteViewProvider extends BaseViewProvider {
         } catch (error: any) {
             console.error('Reconfiguration error:', error);
             MessageManager.showError(`Failed to reconfigure: ${error.message}`);
-            
-            // Fallback: manually show connection error page
             if (this._view) {
                 this._view.webview.html = this.getConnectionErrorHtml();
             }
+        }
+    }
+
+    private async fetchChatSessions(backendUrl: string) {
+        try {
+            const serverProfiles = await loadServerProfiles(this.context);
+            const profile = serverProfiles[backendUrl];
+            if (!profile?.userId) {
+                console.error('No user ID found for this backend');
+                return null;
+            }
+            const response = await axios.get(
+                `${backendUrl}/api/chat/sessions`,
+                { headers: { 'x-user-id': profile.userId } }
+            );
+            return response.data;
+        } catch (error) {
+            console.error('Error fetching chat sessions:', error);
+            return null;
+        }
+    }
+
+    private handleConnectionStatus(connected: boolean, statusText?: string) {
+        if (this._view) {
+            this._view.webview.postMessage({
+                command: 'updateStatus',
+                status: {
+                    text: statusText || (connected ? 'Connected' : 'Disconnected'),
+                    class: connected ? 'text-green-500' : 'text-red-500'
+                }
+            });
+        }
+    }
+
+    private async handleGetModelInfo(webviewView: vscode.WebviewView) {
+        try {
+            const backendUrl = this.getBackendUrl();
+            const response = await axios.get(`${backendUrl}/api/llm/current`);
+            webviewView.webview.postMessage({ 
+                command: 'updateModelInfo', 
+                model: response.data 
+            });
+        } catch (error) {
+            console.error('Failed to fetch model info:', error);
         }
     }
 
@@ -357,7 +414,8 @@ export class RemoteViewProvider extends BaseViewProvider {
                         padding: 20px;
                         color: #cccccc;
                         background-color: #1e1e1e;
-                        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, 'Open Sans', 'Helvetica Neue', sans-serif;
+                        font-family: sans-serif;
+                    }
                 </style>
             </head>
             <body>
@@ -374,64 +432,5 @@ export class RemoteViewProvider extends BaseViewProvider {
         `;
     }
 
-    private async fetchChatSessions(backendUrl: string) {
-        try {
-            const serverProfiles = await loadServerProfiles(this.context);
-            let profile = serverProfiles[backendUrl];
-            
-            if (!profile?.userId) {
-                console.error('No user ID found for this backend');
-                return null;
-            }
-
-            const response = await axios.get(
-                `${backendUrl}/api/chat/sessions`,
-                { headers: { 'x-user-id': profile.userId } }
-            );
-            return response.data;
-        } catch (error) {
-            console.error('Error fetching chat sessions:', error);
-            return null;
-        }
-    }
-
-    private updateConnectionStatus(connected: boolean, statusText?: string) {
-        if (this._view) {
-            this._view.webview.postMessage({
-                command: 'updateStatus',
-                status: {
-                    text: statusText || (connected ? 'Connected' : 'Disconnected'),
-                    class: connected ? 'text-green-500' : 'text-red-500'
-                }
-            });
-        }
-    }
-
-    private async handleGetModelInfo(webviewView: vscode.WebviewView) {
-        try {
-            const config = vscode.workspace.getConfiguration('sage');
-            const backendUrl = config.get('currentRemoteBackendUrl') as string;
-            const response = await axios.get(`${backendUrl}/api/llm/current`);
-            webviewView.webview.postMessage({ 
-                command: 'updateModelInfo', 
-                model: response.data 
-            });
-        } catch (error) {
-            console.error('Failed to fetch model info:', error);
-        }
-    }
-
-    // Helper method to format axios errors consistently
-    private formatAxiosError(error: any): string {
-        if (error.response) {
-            // Server responded with error status
-            return `Server error (${error.response.status}): ${error.response.data?.detail || error.response.statusText}`;
-        } else if (error.request) {
-            // Request was made but no response received
-            return 'No response received from server';
-        } else {
-            // Error in setting up the request
-            return error.message;
-        }
-    }
+    
 } 

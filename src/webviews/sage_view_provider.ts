@@ -110,4 +110,8 @@ export class SageViewProvider implements vscode.WebviewViewProvider {
 			token
 		);
 	}
+
+	get panel(): vscode.WebviewView | undefined {
+		return this._view;
+	}
 }
