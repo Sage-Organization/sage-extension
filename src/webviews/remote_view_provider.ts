@@ -3,13 +3,17 @@ import * as path from 'path';
 import * as fs from 'fs';
 const axios = require('axios');
 import { BaseViewProvider } from './base_view_provider';
-import { loadServerProfiles } from '../utils/server_profiles';
+import { loadServerProfiles, saveServerProfiles } from '../utils/server_profiles';
 import { MessageManager } from '../utils/message_manager';
 
 export class RemoteViewProvider extends BaseViewProvider {
+    protected _view?: vscode.WebviewView;
     private _currentSessionId?: string;
     private _disposables: vscode.Disposable[] = [];
+    
+    // Static key for storing last session ID
     private static readonly LAST_SESSION_KEY = 'sage.lastSessionId';
+    private static readonly STATE_KEY = 'sage.remoteViewState';
 
     constructor(context: vscode.ExtensionContext) {
         super(context);
@@ -20,17 +24,25 @@ export class RemoteViewProvider extends BaseViewProvider {
         context: vscode.WebviewViewResolveContext,
         token: vscode.CancellationToken
     ) {
-        // Clean up old listeners
-        this._disposables.forEach(d => d.dispose());
-        this._disposables = [];
-        
-        this._view = webviewView;
-        webviewView.webview.options = this.getWebviewOptions();
-
-        const config = vscode.workspace.getConfiguration('sage');
-        const backendUrl = config.get('currentRemoteBackendUrl') as string;
-
         try {
+            this._view = webviewView;
+            webviewView.webview.options = this.getWebviewOptions();
+
+            // Add visibility change listener
+            this._disposables.push(
+                webviewView.onDidChangeVisibility(async () => {
+                    if (webviewView.visible) {
+                        const config = vscode.workspace.getConfiguration('sage');
+                        const backendUrl = config.get('currentRemoteBackendUrl') as string;
+                        this.updateConnectionStatus(false, 'Connecting...');
+                        await this.initializeState(backendUrl, webviewView);
+                    }
+                })
+            );
+
+            const config = vscode.workspace.getConfiguration('sage');
+            const backendUrl = config.get('currentRemoteBackendUrl') as string;
+
             // Load the chat interface first
             const filePath = path.join(this.context.extensionPath, 'src', 'media', 'sage.html');
             let htmlContent = fs.readFileSync(filePath, 'utf8');
@@ -40,84 +52,154 @@ export class RemoteViewProvider extends BaseViewProvider {
             const mediaUri = webviewView.webview.asWebviewUri(mediaPath);
             htmlContent = htmlContent.replace(/src="\.\/media\//g, `src="${mediaUri}/`);
             
-            // Add status information
-            const statusClass = 'text-green-500'; // or 'text-red-500' for offline
-            const statusText = 'Connected'; // or 'Disconnected' when offline
-            htmlContent = htmlContent
-                .replace('%STATUS_CLASS%', statusClass)
-                .replace('%STATUS%', statusText);
-
             webviewView.webview.html = htmlContent;
 
-            // Wait for the webview to be ready
-            await new Promise(resolve => setTimeout(resolve, 100));
+            // ALWAYS reinitialize state when view is focused
+            this.updateConnectionStatus(false, 'Connecting...');
+            await this.initializeState(backendUrl, webviewView);
 
-            // Immediately restore the last session ID
-            this._currentSessionId = this.context.globalState.get(RemoteViewProvider.LAST_SESSION_KEY);
+            // Set up message handling
+            webviewView.webview.onDidReceiveMessage(async message => {
+                try {
+                    await this.handleMessage(message, webviewView);
+                } catch (error: any) {
+                    await this.handleError(error, 'Failed to process message');
+                }
+            });
 
-            // Load sessions first
+        } catch (error: any) {
+            await this.handleError(error, 'Failed to connect to remote backend');
+            return;
+        }
+    }
+
+    private async initializeState(backendUrl: string, webviewView: vscode.WebviewView) {
+        try {
+            // Test server connection
+            await axios.get(`${backendUrl}/health`);
+            this.updateConnectionStatus(true, 'Connected');
+
+            // Validate and setup user
+            const serverProfiles = await loadServerProfiles(this.context);
+            let profile = serverProfiles[backendUrl];
+
+            if (profile?.userId) {
+                try {
+                    await axios.get(`${backendUrl}/api/user/validate/${profile.userId}`);
+                } catch (error) {
+                    delete serverProfiles[backendUrl];
+                    await saveServerProfiles(this.context, serverProfiles);
+                    profile = { userId: '' };
+                }
+            }
+
+            if (!profile?.userId) {
+                const userResponse = await axios.post(`${backendUrl}/api/user/users`);
+                const userId = userResponse.data.id;
+                serverProfiles[backendUrl] = { userId };
+                await saveServerProfiles(this.context, serverProfiles);
+                profile = serverProfiles[backendUrl];
+            }
+
+            // Fetch and update model info
+            const modelResponse = await axios.get(`${backendUrl}/api/llm/current`);
+            const modelName = modelResponse.data;
+            webviewView.webview.postMessage({ 
+                command: 'updateModelInfo', 
+                model: modelName 
+            });
+
+            // Fetch chat sessions
             const sessions = await this.fetchChatSessions(backendUrl);
             if (sessions) {
                 webviewView.webview.postMessage({
                     command: 'updateSessions',
                     sessions: sessions
                 });
-            }
 
-            // If we have a last session, load it immediately
-            if (this._currentSessionId) {
-                const serverProfiles = await loadServerProfiles(this.context);
-                const profile = serverProfiles[backendUrl];
-
-                if (profile?.userId) {
-                    const sessionResponse = await axios.get(
-                        `${backendUrl}/api/chat/sessions/${this._currentSessionId}`,
-                        { headers: { 'x-user-id': profile.userId } }
-                    );
-
-                    webviewView.webview.postMessage({
-                        command: 'updateChatHistory',
-                        messages: sessionResponse.data.messages
-                    });
+                // Restore last active session
+                console.log('Restoring last active session');
+                const lastSessionId = await this.context.globalState.get(RemoteViewProvider.LAST_SESSION_KEY);
+                if (lastSessionId) {
+                    try {
+                        console.log('Loading last active session');
+                        const sessionResponse = await axios.get(
+                            `${backendUrl}/api/chat/sessions/${lastSessionId}`,
+                            { headers: { 'x-user-id': profile.userId } }
+                        );
+                        this._currentSessionId = lastSessionId as string;
+                        webviewView.webview.postMessage({
+                            command: 'updateChatHistory',
+                            messages: sessionResponse.data.messages
+                        });
+                    } catch (error) {
+                        // If last session can't be loaded, clear it
+                        await this.context.globalState.update(RemoteViewProvider.LAST_SESSION_KEY, undefined);
+                    }
                 }
             }
 
-            // Register message handlers
-            this._disposables.push(
-                webviewView.webview.onDidReceiveMessage(async message => {
-                    switch (message.command) {
-                        case 'sendMessage':
-                            await this.handleSendMessage(message, webviewView);
-                            break;
-                        case 'selectSession':
-                            await this.handleSelectSession(message, webviewView);
-                            break;
-                        case 'newChatSession':
-                            await this.handleNewChatSession(webviewView);
-                            break;
-                        case 'deleteSession':
-                            await this.handleDeleteSession(message, webviewView);
-                            break;
-                        case 'reconfigure':
-                            await this.handleReconfigure(webviewView);
-                            break;
-                    }
-                })
-            );
-
-            // Add disposal when webview is hidden
-            this._disposables.push(
-                webviewView.onDidDispose(() => {
-                    this._disposables.forEach(d => d.dispose());
-                    this._disposables = [];
-                })
-            );
+            // Save the current state
+            await this.context.globalState.update(RemoteViewProvider.STATE_KEY, {
+                backendUrl,
+                userId: profile.userId,
+                sessionId: this._currentSessionId
+            });
 
         } catch (error: any) {
-            console.error('Error in resolveWebviewView:', error);
-            MessageManager.showError(`Failed to initialize view: ${error.message}`);
-            webviewView.webview.html = this.getConnectionErrorHtml();
+            throw new Error(this.formatAxiosError(error));
         }
+    }
+
+    private async handleMessage(message: any, webviewView: vscode.WebviewView) {
+        const config = vscode.workspace.getConfiguration('sage');
+        const backendUrl = config.get('currentRemoteBackendUrl') as string;
+
+        try {
+            switch (message.command) {
+                case 'tokenize':
+                    webviewView.webview.postMessage({
+                        command: 'tokenized',
+                        originalCode: message.code,
+                        tokenizedCode: this.escapeHtml(message.code)
+                    });
+                    break;
+                case 'sendMessage':
+                    await this.handleSendMessage(message, webviewView);
+                    break;
+                case 'selectSession':
+                    await this.handleSelectSession(message, webviewView);
+                    break;
+                case 'newChatSession':
+                    this._currentSessionId = undefined;
+                    await this.context.globalState.update(RemoteViewProvider.LAST_SESSION_KEY, undefined);
+                    webviewView.webview.postMessage({
+                        command: 'updateChatHistory',
+                        messages: []
+                    });
+                    break;
+                case 'deleteSession':
+                    await this.handleDeleteSession(message, webviewView);
+                    break;
+                case 'reconfigure':
+                    await this.handleReconfigure(webviewView);
+                    break;
+                case 'getModelInfo':
+                    await this.handleGetModelInfo(webviewView);
+                    break;
+            }
+        } catch (error: any) {
+            throw new Error(this.formatAxiosError(error));
+        }
+    }
+
+    private escapeHtml(unsafe: string): string {
+        return unsafe
+            .replace(/&/g, "&amp;")
+            .replace(/</g, "&lt;")
+            .replace(/>/g, "&gt;")
+            .replace(/"/g, "&quot;")
+            .replace(/'/g, "&#039;");
     }
 
     private async handleSendMessage(message: any, webviewView: vscode.WebviewView) {
@@ -171,8 +253,7 @@ export class RemoteViewProvider extends BaseViewProvider {
                 }
             }
         } catch (error: any) {
-            console.error('Error sending message:', error);
-            MessageManager.showError(`Failed to send message: ${error.message}`);
+            await this.handleError(error, 'Failed to send message');
         }
     }
 
@@ -190,7 +271,6 @@ export class RemoteViewProvider extends BaseViewProvider {
                     { headers: { 'x-user-id': profile.userId } }
                 );
                 this._currentSessionId = message.sessionId;
-                // Save the current session ID
                 await this.context.globalState.update(RemoteViewProvider.LAST_SESSION_KEY, message.sessionId);
                 
                 webviewView.webview.postMessage({
@@ -202,15 +282,6 @@ export class RemoteViewProvider extends BaseViewProvider {
                 MessageManager.showError(`Failed to open session: ${error.message}`);
             }
         }
-    }
-
-    private async handleNewChatSession(webviewView: vscode.WebviewView) {
-        this._currentSessionId = undefined;
-        await this.context.globalState.update(RemoteViewProvider.LAST_SESSION_KEY, undefined);
-        webviewView.webview.postMessage({
-            command: 'updateChatHistory',
-            messages: []
-        });
     }
 
     private async handleDeleteSession(message: any, webviewView: vscode.WebviewView) {
@@ -254,12 +325,25 @@ export class RemoteViewProvider extends BaseViewProvider {
     private async handleReconfigure(webviewView: vscode.WebviewView) {
         try {
             MessageManager.showInfo('Reconfiguring Sage...');
+            // Reset configuration
             await vscode.workspace.getConfiguration().update('sage.isConfigured', false, true);
             await vscode.workspace.getConfiguration().update('sage.currentRemoteBackendUrl', '', true);
+            
+            // Force switch to connection view
+            this._currentSessionId = undefined;
+            await this.context.globalState.update(RemoteViewProvider.LAST_SESSION_KEY, undefined);
+            await this.context.globalState.update(RemoteViewProvider.STATE_KEY, undefined);
             await vscode.commands.executeCommand('sage.switchView');
+            
             MessageManager.showInfo('Reconfiguration complete');
         } catch (error: any) {
+            console.error('Reconfiguration error:', error);
             MessageManager.showError(`Failed to reconfigure: ${error.message}`);
+            
+            // Fallback: manually show connection error page
+            if (this._view) {
+                this._view.webview.html = this.getConnectionErrorHtml();
+            }
         }
     }
 
@@ -274,19 +358,6 @@ export class RemoteViewProvider extends BaseViewProvider {
                         color: #cccccc;
                         background-color: #1e1e1e;
                         font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, 'Open Sans', 'Helvetica Neue', sans-serif;
-                    }
-                    button {
-                        background-color: #0066cc;
-                        color: white;
-                        border: none;
-                        padding: 8px 16px;
-                        border-radius: 4px;
-                        cursor: pointer;
-                        margin-top: 16px;
-                    }
-                    button:hover {
-                        background-color: #0052a3;
-                    }
                 </style>
             </head>
             <body>
@@ -306,9 +377,9 @@ export class RemoteViewProvider extends BaseViewProvider {
     private async fetchChatSessions(backendUrl: string) {
         try {
             const serverProfiles = await loadServerProfiles(this.context);
-            const profile = serverProfiles[backendUrl];
+            let profile = serverProfiles[backendUrl];
             
-            if (!profile || !profile.userId) {
+            if (!profile?.userId) {
                 console.error('No user ID found for this backend');
                 return null;
             }
@@ -324,15 +395,43 @@ export class RemoteViewProvider extends BaseViewProvider {
         }
     }
 
-    private updateConnectionStatus(connected: boolean) {
+    private updateConnectionStatus(connected: boolean, statusText?: string) {
         if (this._view) {
             this._view.webview.postMessage({
                 command: 'updateStatus',
                 status: {
-                    text: connected ? 'Connected' : 'Disconnected',
+                    text: statusText || (connected ? 'Connected' : 'Disconnected'),
                     class: connected ? 'text-green-500' : 'text-red-500'
                 }
             });
+        }
+    }
+
+    private async handleGetModelInfo(webviewView: vscode.WebviewView) {
+        try {
+            const config = vscode.workspace.getConfiguration('sage');
+            const backendUrl = config.get('currentRemoteBackendUrl') as string;
+            const response = await axios.get(`${backendUrl}/api/llm/current`);
+            webviewView.webview.postMessage({ 
+                command: 'updateModelInfo', 
+                model: response.data 
+            });
+        } catch (error) {
+            console.error('Failed to fetch model info:', error);
+        }
+    }
+
+    // Helper method to format axios errors consistently
+    private formatAxiosError(error: any): string {
+        if (error.response) {
+            // Server responded with error status
+            return `Server error (${error.response.status}): ${error.response.data?.detail || error.response.statusText}`;
+        } else if (error.request) {
+            // Request was made but no response received
+            return 'No response received from server';
+        } else {
+            // Error in setting up the request
+            return error.message;
         }
     }
 } 

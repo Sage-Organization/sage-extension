@@ -38,12 +38,27 @@ export class SageViewProvider implements vscode.WebviewViewProvider {
 	private async restoreState() {
 		if (!this._view || !this._currentProvider) return;
 
-		// Re-resolve the webview to restore the state
-		await this._currentProvider.resolveWebviewView(
-			this._view,
-			{} as vscode.WebviewViewResolveContext,
-			{} as vscode.CancellationToken
-		);
+		// Only attempt to restore state for non-connection providers
+		if (this._lastActiveProvider !== 'connection') {
+			try {
+				await this._currentProvider.resolveWebviewView(
+					this._view,
+					{} as vscode.WebviewViewResolveContext,
+					{} as vscode.CancellationToken
+				);
+			} catch (error) {
+				// If restoration fails, switch back to connection view
+				console.error('Failed to restore state:', error);
+				this._currentProvider = this._connectionProvider;
+				this._lastActiveProvider = 'connection';
+				await vscode.workspace.getConfiguration().update('sage.isConfigured', false, true);
+				await this._currentProvider.resolveWebviewView(
+					this._view,
+					{} as vscode.WebviewViewResolveContext,
+					{} as vscode.CancellationToken
+				);
+			}
+		}
 	}
 
 	private async updateProvider() {
@@ -53,12 +68,6 @@ export class SageViewProvider implements vscode.WebviewViewProvider {
 		const isConfigured = config.get('isConfigured') as boolean;
 		const isStandalone = config.get('standalone') as boolean;
 
-		// Store the current provider type before switching
-		await this.context.globalState.update(SageViewProvider.STATE_KEY, {
-			isConfigured,
-			isStandalone
-		});
-
 		if (!isConfigured) {
 			this._currentProvider = this._connectionProvider;
 			this._lastActiveProvider = 'connection';
@@ -67,9 +76,10 @@ export class SageViewProvider implements vscode.WebviewViewProvider {
 			this._lastActiveProvider = isStandalone ? 'standalone' : 'remote';
 		}
 
+		// ALWAYS force a full reload when updating provider
 		await this._currentProvider.resolveWebviewView(
-			this._view!,
-			{} as vscode.WebviewViewResolveContext,
+			this._view,
+			{ state: undefined, forceReload: true } as vscode.WebviewViewResolveContext,
 			{} as vscode.CancellationToken
 		);
 	}
@@ -81,42 +91,23 @@ export class SageViewProvider implements vscode.WebviewViewProvider {
 	) {
 		this._view = webviewView;
 
-		// Add visibility change listener for this specific webview
-		this._view.onDidChangeVisibility(() => {
-			if (this._view?.visible) {
-				this.restoreState();
-			}
-		});
-
-		// Get the stored state or current configuration
-		const storedState = this.context.globalState.get(SageViewProvider.STATE_KEY) as any;
 		const config = vscode.workspace.getConfiguration('sage');
-		
-		// Check if this is a fresh install by looking for any stored state or configuration
-		const isFreshInstall = !storedState && 
-			config.get('currentRemoteBackendUrl') === '' && 
-			!config.get('isConfigured');
+		const isConfigured = config.get('isConfigured') as boolean;
+		const isStandalone = config.get('standalone') as boolean;
 
-		// If it's a fresh install, force the connection view
-		if (isFreshInstall) {
+		if (!isConfigured) {
 			this._currentProvider = this._connectionProvider;
 			this._lastActiveProvider = 'connection';
-			// Ensure configuration reflects initial state
-			await vscode.workspace.getConfiguration().update('sage.isConfigured', false, true);
 		} else {
-			// Use stored or current configuration as before
-			const isConfigured = storedState?.isConfigured ?? config.get('isConfigured') as boolean;
-			const isStandalone = storedState?.isStandalone ?? config.get('standalone') as boolean;
-
-			if (!isConfigured) {
-				this._currentProvider = this._connectionProvider;
-				this._lastActiveProvider = 'connection';
-			} else {
-				this._currentProvider = isStandalone ? this._standaloneProvider : this._remoteProvider;
-				this._lastActiveProvider = isStandalone ? 'standalone' : 'remote';
-			}
+			this._currentProvider = isStandalone ? this._standaloneProvider : this._remoteProvider;
+			this._lastActiveProvider = isStandalone ? 'standalone' : 'remote';
 		}
 
-		await this._currentProvider.resolveWebviewView(webviewView, context, token);
+		// ALWAYS create a new context when resolving the view
+		await this._currentProvider.resolveWebviewView(
+			webviewView,
+			{ ...context, forceReload: true } as vscode.WebviewViewResolveContext,
+			token
+		);
 	}
 }

@@ -20,4 +20,16 @@ export abstract class BaseViewProvider implements vscode.WebviewViewProvider {
             ]
         };
     }
+
+    protected async handleError(error: any, message: string): Promise<void> {
+        console.error(message, error);
+        
+        // Reset configuration to force connection view
+        await vscode.workspace.getConfiguration().update('sage.isConfigured', false, true);
+        
+        // Switch to connection view with error message
+        await vscode.commands.executeCommand('sage.switchView', {
+            error: `${message}: ${error.message}`
+        });
+    }
 } 
