@@ -59,17 +59,9 @@ export default function setupMessageHandler() {
                 break;
             }
             case 'updateSessions': {
-                const sessionList = document.getElementById('sessionList');
-                sessionList.innerHTML = '';
-                message.sessions.forEach(session => {
-                    sessionList.innerHTML += `
-                        <div class="px-4 py-2 hover:bg-gray-700 cursor-pointer" 
-                             onclick="selectSession('${session.session_id}')">
-                            <div class="text-sm font-medium">Session ${session.session_id.slice(0, 8)}...</div>
-                            <div class="text-xs text-gray-400">${session.last_message_at || 'No messages'}</div>
-                        </div>
-                    `;
-                });
+                if (message.sessions) {
+                    updateSessionList(message.sessions);
+                }
                 break;
             }
             case 'showStatus': {
@@ -125,6 +117,13 @@ export default function setupMessageHandler() {
                     
                     filenameElement.textContent = `${displayName} ${lineRange}`;
                 }
+                break;
+            }
+            case 'updateModelList': {
+                const modelSelect = document.getElementById('modelSelect');
+                modelSelect.innerHTML = message.models
+                    .map(model => `<option value="${model.name}">${model.name}</option>`)
+                    .join('');
                 break;
             }
         }

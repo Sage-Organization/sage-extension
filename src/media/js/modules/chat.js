@@ -59,28 +59,78 @@ export function handleSessionRightClick(event, sessionId) {
     contextMenu.style.top = event.clientY + 'px';
     contextMenu.style.left = event.clientX + 'px';
     contextMenu.setAttribute('data-session-id', sessionId);
+
+    // Add a click event listener to close the menu when clicking outside
+    const closeContextMenu = (e) => {
+        if (!contextMenu.contains(e.target)) {
+            contextMenu.style.display = 'none';
+            document.removeEventListener('click', closeContextMenu);
+        }
+    };
+    document.addEventListener('click', closeContextMenu);
 }
 
-export function deleteSessionOption() {
-    const contextMenu = document.getElementById('contextMenu');
-    const sessionId = contextMenu.getAttribute('data-session-id');
-    window.vscode.postMessage({ command: 'deleteSession', sessionId: sessionId });
-    contextMenu.style.display = 'none';
-}
-
-export function reconfigure() {
-    window.vscode.postMessage({ command: 'reconfigure' });
+export function deleteSessionOption(sessionId) {
+    // Send delete command to VS Code
+    window.vscode.postMessage({ 
+        command: 'deleteSession', 
+        sessionId: sessionId 
+    });
 }
 
 export function updateSessionList(sessions) {
+    console.log("updateSessionList called with sessions:", sessions);
     const sessionList = document.getElementById('sessionList');
-    sessionList.innerHTML = sessions.map(session => `
-        <div class="px-4 py-2 hover:bg-gray-700 cursor-pointer" 
-             onclick="selectSession('${session.session_id}')">
-            <div class="text-sm font-medium">Session ${session.session_id.slice(0, 8)}...</div>
-            <div class="text-xs text-gray-400">${session.last_message_at || 'No messages'}</div>
-        </div>
-    `).join('');
+    sessionList.innerHTML = '';
+    
+    sessions.forEach(session => {
+        const sessionDiv = document.createElement('div');
+        sessionDiv.classList.add('px-4', 'py-2', 'hover:bg-gray-700', 'cursor-pointer', 'flex', 'justify-between', 'items-center');
+
+        // Left side: Session info
+        const infoDiv = document.createElement('div');
+        infoDiv.classList.add('flex-1');
+        
+        const idDiv = document.createElement('div');
+        idDiv.classList.add('text-sm', 'font-medium');
+        idDiv.textContent = `Session ${session.session_id.slice(0, 8)}...`;
+        
+        const timeDiv = document.createElement('div');
+        timeDiv.classList.add('text-xs', 'text-gray-400');
+        timeDiv.textContent = session.last_message_at || 'No messages';
+
+        infoDiv.appendChild(idDiv);
+        infoDiv.appendChild(timeDiv);
+
+        // Right side: Delete button
+        const deleteButton = document.createElement('button');
+        deleteButton.innerHTML = '<i class="fas fa-trash-alt"></i> 🗑';
+        deleteButton.classList.add(
+            'text-gray-400',
+            'hover:text-red-400',
+            'p-1',
+            'rounded',
+            'transition-colors',
+            'opacity-75',
+            'hover:opacity-100',
+            'ml-2'
+        );
+        
+        // Stop propagation so clicking delete doesn't trigger session selection
+        deleteButton.addEventListener('click', (e) => {
+            e.stopPropagation();
+            deleteSessionOption(session.session_id);
+        });
+
+        // Add click event for selecting the session to the info div
+        infoDiv.addEventListener('click', () => {
+            selectSession(session.session_id);
+        });
+
+        sessionDiv.appendChild(infoDiv);
+        sessionDiv.appendChild(deleteButton);
+        sessionList.appendChild(sessionDiv);
+    });
 }
 
 export function updateModelInfo() {

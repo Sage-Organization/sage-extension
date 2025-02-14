@@ -22,16 +22,8 @@
   "contributes": {
     "commands": [
       {
-        "command": "sage.installBackend",
-        "title": "Sage: Install Backend"
-      },
-      {
         "command": "sage.openPanel",
         "title": "Sage: Open Assistant Panel"
-      },
-      {
-        "command": "sage.openConnectionPanel",
-        "title": "Sage: Configure Backend Connection"
       },
       {
         "command": "sage.switchView",
@@ -42,25 +34,15 @@
       "type": "object",
       "title": "Sage",
       "properties": {
-        "sage.currentRemoteBackendUrl": {
-          "type": "string",
-          "default": "",
-          "description": "Current tracked remote URL for the Sage backend."
-        },
-        "sage.standalone": {
+        "sage.localMode": {
           "type": "boolean",
           "default": false,
-          "description": "Enable standalone mode for the backend."
+          "description": "Enable local mode for the backend."
         },
         "sage.isConfigured": {
           "type": "boolean",
           "default": false,
           "description": "Tracks if the user has already configured the backend."
-        },
-        "sage.promptForBackendOnActivation": {
-          "type": "boolean",
-          "default": false,
-          "description": "Prompt for backend installation on activation even if the backend is already installed."
         }
       }
     },
@@ -85,6 +67,7 @@
   },
   "dependencies": {
     "axios": "^1.7.9",
+    "ollama": "^0.5.13",
     "python-shell": "^5.0.0"
   },
   "scripts": {

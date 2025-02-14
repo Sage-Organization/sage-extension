@@ -1,22 +1,16 @@
 import * as vscode from 'vscode';
-import { ConnectionViewProvider } from './connection_view_provider';
-import { StandaloneViewProvider } from './standalone_view_provider';
-import { RemoteViewProvider } from './remote_view_provider';
+import { LocalViewProvider } from './local_view_provider';
 import { MessageManager } from '../utils/message_manager';
 
 export class SageViewProvider implements vscode.WebviewViewProvider {
 	private _currentProvider?: vscode.WebviewViewProvider;
-	private _connectionProvider: ConnectionViewProvider;
-	private _standaloneProvider: StandaloneViewProvider;
-	private _remoteProvider: RemoteViewProvider;
+	private _localviewProvider: LocalViewProvider;
 	private _view?: vscode.WebviewView;
 	private static readonly STATE_KEY = 'sage.viewState';
 	private _lastActiveProvider?: string;
 
 	constructor(private readonly context: vscode.ExtensionContext) {
-		this._connectionProvider = new ConnectionViewProvider(context);
-		this._standaloneProvider = new StandaloneViewProvider(context);
-		this._remoteProvider = new RemoteViewProvider(context);
+		this._localviewProvider = new LocalViewProvider(context);
 
 		// Add configuration change listener
 		vscode.workspace.onDidChangeConfiguration(e => {
@@ -49,8 +43,8 @@ export class SageViewProvider implements vscode.WebviewViewProvider {
 			} catch (error) {
 				// If restoration fails, switch back to connection view
 				console.error('Failed to restore state:', error);
-				this._currentProvider = this._connectionProvider;
-				this._lastActiveProvider = 'connection';
+				this._currentProvider = this._localviewProvider;
+				this._lastActiveProvider = 'local';
 				await vscode.workspace.getConfiguration().update('sage.isConfigured', false, true);
 				await this._currentProvider.resolveWebviewView(
 					this._view,
@@ -66,14 +60,14 @@ export class SageViewProvider implements vscode.WebviewViewProvider {
 
 		const config = vscode.workspace.getConfiguration('sage');
 		const isConfigured = config.get('isConfigured') as boolean;
-		const isStandalone = config.get('standalone') as boolean;
+		const isLocalMode = config.get('localMode') as boolean;
 
 		if (!isConfigured) {
-			this._currentProvider = this._connectionProvider;
-			this._lastActiveProvider = 'connection';
+			this._currentProvider = this._localviewProvider;
+			this._lastActiveProvider = 'local';
 		} else {
-			this._currentProvider = isStandalone ? this._standaloneProvider : this._remoteProvider;
-			this._lastActiveProvider = isStandalone ? 'standalone' : 'remote';
+			this._currentProvider = isLocalMode ? this._localviewProvider : this._localviewProvider;
+			this._lastActiveProvider = isLocalMode ? 'local' : 'local';
 		}
 
 		// ALWAYS force a full reload when updating provider
@@ -93,14 +87,14 @@ export class SageViewProvider implements vscode.WebviewViewProvider {
 
 		const config = vscode.workspace.getConfiguration('sage');
 		const isConfigured = config.get('isConfigured') as boolean;
-		const isStandalone = config.get('standalone') as boolean;
+		const isLocalMode = config.get('localMode') as boolean;
 
 		if (!isConfigured) {
-			this._currentProvider = this._connectionProvider;
-			this._lastActiveProvider = 'connection';
+			this._currentProvider = this._localviewProvider;
+			this._lastActiveProvider = 'local';
 		} else {
-			this._currentProvider = isStandalone ? this._standaloneProvider : this._remoteProvider;
-			this._lastActiveProvider = isStandalone ? 'standalone' : 'remote';
+			this._currentProvider = isLocalMode ? this._localviewProvider : this._localviewProvider;
+			this._lastActiveProvider = isLocalMode ? 'local' : 'local';
 		}
 
 		// ALWAYS create a new context when resolving the view

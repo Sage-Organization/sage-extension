@@ -1,16 +1,17 @@
 <!DOCTYPE html>
 <html lang="en">
+<!-- Head section remains the same until the body -->
 <head>
+    <!-- Previous head content remains identical -->
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Sage</title>
+    <title>Sage Local</title>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.4/css/all.min.css">
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
-    <!-- Include highlight.js dark theme CSS -->
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.6.0/styles/github-dark.min.css">
-    <!-- Include highlight.js library -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.6.0/highlight.min.js"></script>
+    <!-- Previous styling remains identical -->
     <script>
         tailwind.config = {
             theme: {
@@ -26,11 +27,8 @@
         }
     </script>
     <style>
-        /* Prevent the body from scrolling */
-        html, body {
-            overflow: hidden;
-        }
-        /* Simple context menu styling */
+        /* Same styles as remote_sage.html */
+        html, body { overflow: hidden; }
         #contextMenu {
             position: absolute;
             background-color: #ffffff;
@@ -62,7 +60,6 @@
             font-family: var(--vscode-editor-font-family);
             font-size: var(--vscode-editor-font-size);
         }
-        /* Add markdown styling */
         .markdown-content {
             width: 100%;
             color: inherit;
@@ -87,12 +84,10 @@
             margin: 0.5em 0;
             font-weight: bold;
         }
-        /* Add these styles */
         .chat-container {
             mask-image: linear-gradient(to top, transparent, black 30px);
             -webkit-mask-image: linear-gradient(to top, transparent, black 30px);
         }
-        /* Add border to code blocks in chat */
         .markdown-content pre {
             border: 1px solid #404040;
             border-radius: 6px;
@@ -102,45 +97,35 @@
             box-sizing: border-box;
             overflow-x: auto;
         }
-        /* Add padding to chat history container */
         #chatHistory {
-            padding-right: 4px;  /* Small padding between content and scrollbar */
+            padding-right: 4px;
         }
-        /* Ensure message containers take full width */
         .flex.justify-start.mb-4 > div {
-            width: calc(100% - 4px) !important;  /* Subtract the padding to prevent horizontal scroll */
+            width: calc(100% - 4px) !important;
             max-width: calc(100% - 4px) !important;
         }
-        /* Code preview styles */
         #codePreview {
             transition: max-height 0.3s ease-in-out;
         }
-        
         #codePreviewContent {
             transition: max-height 0.3s ease-in-out;
         }
-        
         #codePreview .markdown-content pre {
-            margin: 0;  /* Remove margin since we're in a dedicated preview container */
+            margin: 0;
         }
-        
-        /* Style the control buttons container */
         #codePreview .absolute {
-            background-color: rgba(45, 45, 45, 0.8);  /* Semi-transparent background */
+            background-color: rgba(45, 45, 45, 0.8);
             border-radius: 6px;
             padding: 2px;
         }
-        /* Add line numbers styling */
         .markdown-content pre {
             counter-reset: line;
         }
-        
         .markdown-content pre code {
             display: block;
-            padding-left: 3em !important;  /* Space for line numbers */
+            padding-left: 3em !important;
             position: relative;
         }
-        
         .markdown-content pre code::before {
             counter-increment: line;
             content: counter(line);
@@ -153,8 +138,6 @@
             border-right: 1px solid #404040;
             user-select: none;
         }
-        
-        /* Ensure the filename doesn't wrap */
         #codePreviewFilename {
             max-width: 200px;
             overflow: hidden;
@@ -168,27 +151,27 @@
     <div class="container mx-auto max-w-5xl h-full flex flex-col px-6 pr-8 py-6 overflow-hidden">
         <!-- Header (fixed height) -->
         <div class="flex items-center justify-between mb-4 flex-shrink-0">
-            <!-- Left side: Connection Status and Model -->
+            <!-- Left side: Model Selector -->
             <div class="text-sm flex items-center space-x-3">
-                <span class="%STATUS_CLASS%">
-                    <i class="fas fa-circle mr-1"></i>%STATUS%
-                </span>
+                <select id="modelSelect" class="bg-lighter-grey text-white px-3 py-2 rounded-lg text-sm" onchange="setModel(this.value)">
+                    <!-- Models will be populated dynamically -->
+                </select>
                 <span class="text-gray-500 opacity-75" id="modelInfo">
                     Loading model...
                 </span>
             </div>
             
-            <!-- Right side: Buttons with dropdown -->
+            <!-- Right side: Icon buttons -->
             <div class="flex items-center space-x-2">
-                <!-- Chat History Dropdown -->
+                <!-- History Icon -->
                 <div class="relative">
                     <button 
                         id="historyDropdownButton"
-                        class="px-4 py-2 bg-lighter-grey hover:bg-gray-700 text-white rounded-lg transition-colors text-sm flex items-center"
-                        onclick="toggleHistoryDropdown()">
-                        <i class="fas fa-history mr-2"></i>History
+                        class="p-2 bg-lighter-grey hover:bg-gray-700 text-white rounded-lg transition-colors"
+                        onclick="toggleHistoryDropdown()"
+                        title="Chat History">
+                        <i class="fas fa-history"></i>
                     </button>
-                    <!-- Dropdown Content -->
                     <div id="historyDropdown" 
                          class="hidden absolute right-0 mt-2 w-64 bg-light-grey rounded-lg shadow-lg z-50 max-h-96 overflow-y-auto">
                         <div id="sessionList" class="py-2">
@@ -197,41 +180,36 @@
                     </div>
                 </div>
 
-                <!-- Configure Button -->
+                <!-- Configure Icon -->
                 <button 
-                    class="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition-colors text-sm"
-                    onclick="reconfigure()">
-                    <i class="fas fa-cog mr-2"></i>Configure
+                    class="p-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition-colors"
+                    onclick=""
+                    title="Configure">
+                    <i class="fas fa-cog"></i>
                 </button>
 
-                <!-- New Chat Button -->
+                <!-- New Chat Icon -->
                 <button 
-                    class="px-4 py-2 bg-green-600 hover:bg-green-700 text-white rounded-lg transition-colors text-sm"
-                    onclick="newChatSession()">
-                    <i class="fas fa-plus mr-2"></i>New Chat
+                    class="p-2 bg-green-600 hover:bg-green-700 text-white rounded-lg transition-colors"
+                    onclick="newChatSession()"
+                    title="New Chat">
+                    <i class="fas fa-plus"></i>
                 </button>
             </div>
         </div>
 
-        <!-- Main Chat Area (fills remaining height) -->
+        <!-- Main Chat Area -->
         <div class="flex-1 overflow-hidden relative">
-            <!-- Chat Panel -->
             <div class="flex flex-col h-full">
-                <!-- Chat History (scrollable area) -->
                 <div id="chatHistory" class="flex-1 overflow-y-auto pb-4 chat-container">
                     <!-- Chat messages will appear here -->
                 </div>
-                <!-- Add this right before the message input div -->
                 <div id="codePreview" class="hidden mb-4">
                     <div class="relative bg-light-grey rounded-lg p-4 max-h-[200px] overflow-hidden">
-                        <!-- Header with filename and controls -->
                         <div class="absolute top-2 left-2 right-2 flex justify-between items-center">
-                            <!-- Filename -->
                             <div class="p-1.5 bg-gray-700 rounded-md text-gray-300 text-xs">
                                 <span id="codePreviewFilename">Untitled</span>
                             </div>
-                            
-                            <!-- Control buttons -->
                             <div class="flex space-x-2">
                                 <button onclick="toggleCodePreview()" 
                                         class="p-1.5 bg-gray-700 hover:bg-gray-600 rounded-md text-gray-300 text-xs">
@@ -243,14 +221,12 @@
                                 </button>
                             </div>
                         </div>
-                        
-                        <!-- Code content container with added top padding for the header -->
                         <div id="codePreviewContent" class="markdown-content overflow-y-auto max-h-[200px] pr-4 mt-8">
                             <!-- Code will be inserted here -->
                         </div>
                     </div>
                 </div>
-                <!-- Message Input (fixed at bottom) -->
+                <!-- Message Input -->
                 <div class="mt-4">
                     <div class="relative bg-gray-800 rounded-xl">
                         <textarea 
@@ -282,10 +258,10 @@
     </div>
 
     <!-- Context Menu for Session items -->
-    <div id="contextMenu">
+    <div id="contextMenu" class="hidden">
         <div onclick="deleteSessionOption()">Delete Chat Session</div>
     </div>
 
     <script src="./media/js/sage.js" type="module"></script>
 </body>
-</html> 
+</html>
