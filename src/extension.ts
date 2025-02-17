@@ -355,13 +355,13 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
 
     private _getHtmlForWebview(webview: vscode.Webview) {
         // Get URIs for all JS modules
-        const mainScriptUri = webview.asWebviewUri(vscode.Uri.joinPath(this._extensionUri, 'media', 'js', 'main.js'));
-        const stateScriptUri = webview.asWebviewUri(vscode.Uri.joinPath(this._extensionUri, 'media', 'js', 'state.js'));
-        const uiScriptUri = webview.asWebviewUri(vscode.Uri.joinPath(this._extensionUri, 'media', 'js', 'ui.js'));
-        const messageHandlersUri = webview.asWebviewUri(vscode.Uri.joinPath(this._extensionUri, 'media', 'js', 'messageHandlers.js'));
-        const eventListenersUri = webview.asWebviewUri(vscode.Uri.joinPath(this._extensionUri, 'media', 'js', 'eventListeners.js'));
-        const styleUri = webview.asWebviewUri(vscode.Uri.joinPath(this._extensionUri, 'media', 'style.css'));
-        const htmlPath = vscode.Uri.joinPath(this._extensionUri, 'media', 'chat.html');
+        const mainScriptUri = webview.asWebviewUri(vscode.Uri.joinPath(this._extensionUri, 'src', 'media', 'js', 'main.js'));
+        const stateScriptUri = webview.asWebviewUri(vscode.Uri.joinPath(this._extensionUri, 'src', 'media', 'js', 'state.js'));
+        const uiScriptUri = webview.asWebviewUri(vscode.Uri.joinPath(this._extensionUri, 'src', 'media', 'js', 'ui.js'));
+        const messageHandlersUri = webview.asWebviewUri(vscode.Uri.joinPath(this._extensionUri, 'src', 'media', 'js', 'messageHandlers.js'));
+        const eventListenersUri = webview.asWebviewUri(vscode.Uri.joinPath(this._extensionUri, 'src', 'media', 'js', 'eventListeners.js'));
+        const styleUri = webview.asWebviewUri(vscode.Uri.joinPath(this._extensionUri, 'src', 'media', 'style.css'));
+        const htmlPath = vscode.Uri.joinPath(this._extensionUri, 'src', 'media', 'chat.html');
         let htmlContent = fs.readFileSync(htmlPath.fsPath, 'utf8');
 
         // Replace template variables
