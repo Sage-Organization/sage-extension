@@ -1,7 +1,16 @@
 export interface ChatMessage {
     role: 'user' | 'assistant';
     content: string;
+    code: ChatMessageCode[];
     timestamp: number;
+}
+
+export interface ChatMessageCode {
+    language: string;
+    code: string;
+    filename: string;
+    start_line: number;
+    end_line: number;
 }
 
 export interface ChatSession {
@@ -21,13 +30,13 @@ export interface ChatState {
 // Messages between webview and extension
 export interface WebviewMessage {
     type: 'createSession' | 'deleteSession' | 'switchSession' | 'sendMessage' | 
-          'loadModel' | 'unloadModel' | 'switchModel' | 'getModels';
+          'loadModel' | 'unloadModel' | 'checkOllamaInstallation' | 'getModels' | 'getActiveFileInfo';
     payload: any;
 }
 
-export interface ExtensionMessage {
-    type: 'sessionCreated' | 'sessionDeleted' | 'sessionSwitched' | 'messageReceived' |
-          'modelLoaded' | 'modelUnloaded' | 'modelSwitched' | 'modelList' | 'error' |
-          'initialize';
+export type ExtensionMessage = {
+    type: 'ollamaStatus' | 'sessionCreated' | 'sessionDeleted' | 'sessionSwitched' | 
+          'messageReceived' | 'modelLoaded' | 'modelUnloaded' | 'error' | 'initialize' | 
+          'modelList' | 'messageUpdated' | 'fileInfo';
     payload: any;
-} 
+};

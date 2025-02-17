@@ -3,22 +3,34 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src {{cspSource}} https://*.vscode-cdn.net https://cdn.tailwindcss.com https://cdnjs.cloudflare.com 'unsafe-inline'; script-src {{cspSource}} https://cdn.tailwindcss.com https://cdnjs.cloudflare.com 'unsafe-inline'; font-src https://cdnjs.cloudflare.com;">
+    <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src {{cspSource}} https://*.vscode-cdn.net https://cdn.tailwindcss.com https://cdnjs.cloudflare.com 'unsafe-inline'; script-src {{cspSource}} https://cdn.tailwindcss.com https://cdnjs.cloudflare.com 'unsafe-inline'; font-src https://cdnjs.cloudflare.com; connect-src 'self';">
     <title>Sage</title>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.4/css/all.min.css">
     <script src="https://cdn.tailwindcss.com"></script>
     <link rel="stylesheet" href="{{styleUri}}">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/markdown-it/13.0.1/markdown-it.min.js"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.8.0/styles/github-dark.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.8.0/highlight.min.js"></script>
 </head>
 <body>
     <div class="container">
         <!-- Header -->
         <div class="header">
-            <!-- Left side: Model Selector -->
-            <div class="flex items-center">
-                <select id="modelSelect" class="w-48">
-                    <option value="">Select Model</option>
-                </select>
+            <!-- Left side: Model Display and Selector -->
+            <div class="flex items-center space-x-2 relative">
+                <div class="model-selector-container">
+                    <span id="currentModel" class="text-sm"></span>
+                    <button id="modelDropdownButton" class="p-1 hover:bg-lighter-grey rounded">
+                        <i class="fas fa-chevron-down text-xs"></i>
+                    </button>
+                    <div id="modelSelect" class="hidden model-dropdown rounded-lg shadow-lg z-50 max-h-96 overflow-y-auto">
+                        <!-- Model options will be populated here -->
+                    </div>
+                </div>
             </div>
+
+            <!-- Center: Current Session ID -->
+            <div id="currentSessionId" class="text-sm text-gray-500"></div>
             
             <!-- Right side: Icon buttons -->
             <div class="flex items-center space-x-2">
@@ -55,6 +67,9 @@
 
         <!-- Message Input -->
         <div class="input-area">
+            <div id="codePreview" class="hidden">
+                <!-- Code preview will be inserted here -->
+            </div>
             <textarea 
                 id="userInput"
                 placeholder="Type your message here..."
@@ -72,6 +87,6 @@
         const vscode = acquireVsCodeApi();
         const initialState = {{initialState}};
     </script>
-    <script src="{{scriptUri}}"></script>
+    <script type="module" src="{{mainScriptUri}}"></script>
 </body>
 </html> 
