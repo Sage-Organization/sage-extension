@@ -378,7 +378,7 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
         return htmlContent;
     }
 
-    private getActiveFileInfo(code: string): { filename: string; startLine: number; endLine: number } | null {
+    private getActiveFileInfo(code: string): { filename: string; fileContent: string; filePath: string; startLine: number; endLine: number } | null {
         const editor = vscode.window.activeTextEditor;
         if (!editor) {
             return null;
@@ -386,18 +386,23 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
 
         const document = editor.document;
         const selection = editor.selection;
+        const documentText = document.getText();
+        
+        // Use path.basename() for cross-platform path handling
+        const filename = path.basename(document.fileName);
         
         // If there's a selection, use those line numbers
         if (!selection.isEmpty) {
             return {
-                filename: document.fileName.split('/').pop() || '',
+                filename,
+                fileContent: documentText,
+                filePath: document.fileName,
                 startLine: selection.start.line + 1,
                 endLine: selection.end.line + 1
             };
         }
 
-        // If no selection, try to find the code in the file
-        const documentText = document.getText();
+        // If no selection, find the code's location in the file
         const lines = documentText.split('\n');
         let startLine = 1;
         
@@ -409,7 +414,9 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
         }
 
         return {
-            filename: document.fileName.split('/').pop() || '',
+            filename,
+            fileContent: documentText,
+            filePath: document.fileName,
             startLine: startLine,
             endLine: startLine + code.split('\n').length - 1
         };

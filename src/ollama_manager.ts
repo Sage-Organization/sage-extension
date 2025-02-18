@@ -64,60 +64,6 @@ export class OllamaManager {
         return response.models.map(model => model.name);
     }
 
-    async generateResponse(message: ChatMessage, session: ChatSession): Promise<ChatMessage> {
-        if (!this.model) {
-            throw new Error('No model selected');
-        }
-
-        const messageHistory = session.messages
-            .map((msg: ChatMessage) => {
-                let content = `${msg.role}: ${msg.content}`;
-
-                if (msg.code.length > 0) {
-                    content += '\n' + msg.code
-                        .map(code => `\`\`\`${code.language}\n${code.code}\n\`\`\``)
-                        .join('\n');
-                }
-                return content;
-            })
-            .join('\n\n');
-        
-        let response: any;
-        try {
-            response = await this._ollama.generate({
-                model: this.model,
-                system: `You are Sage, an intelligent and helpful coding assistant. Your responses should be:
-                    - Clear and concise
-                    - Well-structured using markdown
-                    - Code-focused, using proper syntax highlighting
-                    - If asked for or providing an explanation, use markdown, and make it as concise as possible.
-                    - Do not show usage examples unless explicitly asked for it.`,
-            prompt: messageHistory + '\n\nuser: ' + message.content,
-            options: {
-                num_ctx: 4096,
-                top_k: 40,
-                top_p: 0.9,
-                temperature: 0.7
-            }
-        });
-        } catch (error: any) {
-            console.error('Error generating response:', error);
-            return {
-                role: 'assistant',
-                content: 'An error occurred while generating the response. Please try again.',
-                code: [],
-                timestamp: Date.now()
-            };
-        }
-
-        return {
-            role: 'assistant',
-            content: response.response,
-            code: [],
-            timestamp: Date.now()
-        };
-    }
-
     async *generateResponseStream(message: ChatMessage, session: ChatSession) {
         if (!this.model) {
             console.error('No model selected');
@@ -140,7 +86,7 @@ export class OllamaManager {
                 ...session.messages.map(msg => {
                     let content = msg.content;
 
-                    // Add code blocks if present
+                    // Add code blocks if presentLL
                     if (msg.code && msg.code.length > 0) {
                         content += '\n\nCode:\n' + msg.code.map(codeBlock => {
                             let codeHeader = codeBlock.filename ? 
@@ -167,7 +113,7 @@ export class OllamaManager {
                 messages,
                 stream: true,
                 options: {
-                    num_ctx: 4096,
+                    num_ctx: 32768,
                     temperature: 0.7
                 }
             });

@@ -148,6 +148,7 @@ html, body {
     line-height: 20px;
     box-sizing: border-box;
     resize: none;
+    overflow-y: hidden;
 }
 
 #userInput:focus {

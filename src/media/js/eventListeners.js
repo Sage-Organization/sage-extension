@@ -25,26 +25,36 @@ export function setupEventListeners(elements) {
     });
 
     elements.userInput.addEventListener('input', () => {
+        // Reset height to auto to get the correct scrollHeight
         elements.userInput.style.height = 'auto';
-        elements.userInput.style.height = Math.min(elements.userInput.scrollHeight, 200) + 'px';
+        // Set the height to match the content, with a max of 150px
+        elements.userInput.style.height = Math.min(elements.userInput.scrollHeight, 150) + 'px';
     });
 
     // Add a message handler for file info at the top level
     window.addEventListener('message', event => {
         if (event.data.type === 'fileInfo' && event.data.payload) {
             const fileInfo = event.data.payload;
-            // Find the most recently added tab and update it
-            const lastTab = elements.codePreview.querySelector('.code-tab:last-child');
-            const lastCodeBlock = elements.codePreview.querySelector('.code-block:last-child');
+            // Find the two most recently added tabs
+            const tabs = elements.codePreview.querySelectorAll('.code-tab:nth-last-child(-n+2)');
+            const codeBlocks = elements.codePreview.querySelectorAll('.code-block:nth-last-child(-n+2)');
             
-            if (lastTab && lastCodeBlock) {
-                // Update tab text with file info
-                lastTab.textContent = `${fileInfo.filename} (${fileInfo.startLine}-${fileInfo.endLine})`;
+            if (tabs.length === 2 && codeBlocks.length === 2) {
+                // Update full file tab
+                tabs[0].textContent = fileInfo.filename;
+                codeBlocks[0].dataset.filename = fileInfo.filename;
                 
-                // Store file info in the code block's dataset
-                lastCodeBlock.dataset.filename = fileInfo.filename;
-                lastCodeBlock.dataset.startLine = fileInfo.startLine.toString();
-                lastCodeBlock.dataset.endLine = fileInfo.endLine.toString();
+                // Update selection tab
+                tabs[1].textContent = `${fileInfo.filename} (${fileInfo.startLine}-${fileInfo.endLine})`;
+                codeBlocks[1].dataset.filename = fileInfo.filename;
+                codeBlocks[1].dataset.startLine = fileInfo.startLine.toString();
+                codeBlocks[1].dataset.endLine = fileInfo.endLine.toString();
+
+                // Update the content of the full file code block with the complete file
+                const fullFileContent = codeBlocks[0].querySelector('pre');
+                fullFileContent.innerHTML = hljs.highlight(fileInfo.fileContent, 
+                    { language: codeBlocks[0].dataset.language }).value;
+                codeBlocks[0].dataset.code = fileInfo.fileContent;
             }
         }
     });
@@ -82,61 +92,79 @@ export function setupEventListeners(elements) {
                     const tabsContainer = elements.codePreview.querySelector('.code-tabs');
                     const previewsContainer = elements.codePreview.querySelector('.code-previews');
 
-                    // Create new tab (initially with loading state)
-                    const tabId = `code-${Date.now()}`;
-                    const tab = document.createElement('div');
-                    tab.className = 'code-tab';
-                    tab.dataset.tabId = tabId;
-                    tab.innerHTML = `<i class="fas fa-spinner fa-spin"></i> Loading file info...`;
-                    tabsContainer.appendChild(tab);
+                    // Create base tabId
+                    const baseTabId = `code-${Date.now()}`;
+                    
+                    // Create two tabs: one for full file, one for selection
+                    const fullFileTab = document.createElement('div');
+                    fullFileTab.className = 'code-tab';
+                    fullFileTab.dataset.tabId = `${baseTabId}-full`;
+                    fullFileTab.innerHTML = `<i class="fas fa-spinner fa-spin"></i> Loading file...`;
+                    
+                    const selectionTab = document.createElement('div');
+                    selectionTab.className = 'code-tab';
+                    selectionTab.dataset.tabId = `${baseTabId}-selection`;
+                    selectionTab.innerHTML = `<i class="fas fa-spinner fa-spin"></i> Loading selection...`;
+                    
+                    tabsContainer.appendChild(fullFileTab);
+                    tabsContainer.appendChild(selectionTab);
 
-                    // Create new code block
-                    const codeBlock = document.createElement('div');
-                    codeBlock.className = 'code-block hidden';
-                    codeBlock.dataset.tabId = tabId;
+                    // Create two code blocks: one for full file, one for selection
+                    const createCodeBlock = (tabId, code, language) => {
+                        const codeBlock = document.createElement('div');
+                        codeBlock.className = 'code-block hidden';
+                        codeBlock.dataset.tabId = tabId;
+                        
+                        const codeHeader = document.createElement('div');
+                        codeHeader.className = 'code-header';
+                        codeHeader.innerHTML = `
+                            <span class="language">${language}</span>
+                            <button class="remove-preview" title="Remove code">
+                                <i class="fas fa-times"></i>
+                            </button>
+                        `;
+                        
+                        const codeContent = document.createElement('pre');
+                        codeContent.className = `language-${language}`;
+                        codeContent.innerHTML = hljs.highlight(code, { language }).value;
+                        
+                        codeBlock.appendChild(codeHeader);
+                        codeBlock.appendChild(codeContent);
+                        codeBlock.dataset.code = code;
+                        codeBlock.dataset.language = language;
+                        
+                        return codeBlock;
+                    };
+
+                    // Create and append both code blocks
+                    const fullFileBlock = createCodeBlock(`${baseTabId}-full`, pastedText, metadata.mode);
+                    const selectionBlock = createCodeBlock(`${baseTabId}-selection`, pastedText, metadata.mode);
                     
-                    const codeHeader = document.createElement('div');
-                    codeHeader.className = 'code-header';
-                    codeHeader.innerHTML = `
-                        <span class="language">${metadata.mode}</span>
-                        <button class="remove-preview" title="Remove code">
-                            <i class="fas fa-times"></i>
-                        </button>
-                    `;
-                    
-                    const codeContent = document.createElement('pre');
-                    codeContent.className = `language-${metadata.mode}`;
-                    codeContent.innerHTML = hljs.highlight(pastedText, { language: metadata.mode }).value;
-                    
-                    codeBlock.appendChild(codeHeader);
-                    codeBlock.appendChild(codeContent);
-                    
-                    // Store code data
-                    codeBlock.dataset.code = pastedText;
-                    codeBlock.dataset.language = metadata.mode;
-                    
-                    previewsContainer.appendChild(codeBlock);
+                    previewsContainer.appendChild(fullFileBlock);
+                    previewsContainer.appendChild(selectionBlock);
                     elements.codePreview.classList.remove('hidden');
 
-                    // Add click handler for tab
-                    tab.addEventListener('click', () => {
-                        const previewsContainer = elements.codePreview.querySelector('.code-previews');
-                        const isCurrentlyActive = tab.classList.contains('active');
+                    // Add click handlers for tabs
+                    const addTabHandler = (tab, codeBlock) => {
+                        tab.addEventListener('click', () => {
+                            const isCurrentlyActive = tab.classList.contains('active');
 
-                        // Hide all code blocks and deactivate all tabs
-                        document.querySelectorAll('.code-block').forEach(block => 
-                            block.classList.add('hidden'));
-                        document.querySelectorAll('.code-tab').forEach(t => 
-                            t.classList.remove('active'));
-                        previewsContainer.classList.add('hidden');
+                            document.querySelectorAll('.code-block').forEach(block => 
+                                block.classList.add('hidden'));
+                            document.querySelectorAll('.code-tab').forEach(t => 
+                                t.classList.remove('active'));
+                            previewsContainer.classList.add('hidden');
 
-                        if (!isCurrentlyActive) {
-                            // Show this code block and activate this tab
-                            codeBlock.classList.remove('hidden');
-                            tab.classList.add('active');
-                            previewsContainer.classList.remove('hidden');
-                        }
-                    });
+                            if (!isCurrentlyActive) {
+                                codeBlock.classList.remove('hidden');
+                                tab.classList.add('active');
+                                previewsContainer.classList.remove('hidden');
+                            }
+                        });
+                    };
+
+                    addTabHandler(fullFileTab, fullFileBlock);
+                    addTabHandler(selectionTab, selectionBlock);
 
                     // Add click handler to hide preview when clicking outside
                     document.addEventListener('click', (e) => {
@@ -147,16 +175,21 @@ export function setupEventListeners(elements) {
                         }
                     });
 
-                    // Add remove handler
-                    codeHeader.querySelector('.remove-preview').addEventListener('click', (e) => {
-                        e.stopPropagation();
-                        tab.remove();
-                        codeBlock.remove();
-                        
-                        if (!tabsContainer.children.length) {
-                            elements.codePreview.classList.add('hidden');
-                        }
-                    });
+                    // Add remove handlers
+                    const addRemoveHandler = (tab, codeBlock) => {
+                        codeBlock.querySelector('.remove-preview').addEventListener('click', (e) => {
+                            e.stopPropagation();
+                            tab.remove();
+                            codeBlock.remove();
+                            
+                            if (!tabsContainer.children.length) {
+                                elements.codePreview.classList.add('hidden');
+                            }
+                        });
+                    };
+
+                    addRemoveHandler(fullFileTab, fullFileBlock);
+                    addRemoveHandler(selectionTab, selectionBlock);
                 }
             } catch (e) {
                 console.error('Error processing VS Code paste:', e);
@@ -180,13 +213,22 @@ export function setupEventListeners(elements) {
 
 function sendMessage(elements) {
     const content = elements.userInput.value.trim();
-    const codeBlocks = Array.from(elements.codePreview.querySelectorAll('.code-block')).map(block => ({
-        language: block.dataset.language,
-        code: block.dataset.code,
-        filename: block.dataset.filename || '',
-        start_line: parseInt(block.dataset.startLine) || 0,
-        end_line: parseInt(block.dataset.endLine) || 0
-    }));
+    const codeBlocks = Array.from(elements.codePreview.querySelectorAll('.code-block')).map(block => {
+        // Base code block object
+        const codeBlock = {
+            language: block.dataset.language,
+            code: block.dataset.code,
+            filename: block.dataset.filename || ''
+        };
+
+        // Only add line numbers if they exist (for selection blocks)
+        if (block.dataset.startLine && block.dataset.endLine) {
+            codeBlock.start_line = parseInt(block.dataset.startLine);
+            codeBlock.end_line = parseInt(block.dataset.endLine);
+        }
+
+        return codeBlock;
+    });
 
     if (content || codeBlocks.length > 0) {
         const state = getState();
